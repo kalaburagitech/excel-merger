@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import * as XLSX from "xlsx";
+import JSZip from "jszip"; // Import JSZip for handling zip files
 
 const ExcelMergerCSV = () => {
   const [files, setFiles] = useState([]);
@@ -16,7 +17,7 @@ const ExcelMergerCSV = () => {
 
   const mergeAndDownloadCSV = async () => {
     if (files.length === 0) {
-      alert("Please select at least one Excel file!");
+      alert("Please select a ZIP file!");
       return;
     }
 
@@ -27,22 +28,32 @@ const ExcelMergerCSV = () => {
     // Simulate upload with estimated time
     for (let i = 0; i < totalFiles; i++) {
       const file = files[i];
-      const data = await file.arrayBuffer();
-      const workbook = XLSX.read(data);
-      const sheetNames = workbook.SheetNames;
 
-      sheetNames.forEach((sheetName) => {
-        const sheet = workbook.Sheets[sheetName];
-        const json = XLSX.utils.sheet_to_json(sheet, { defval: "" });
-        mergedData = mergedData.concat(json);
-      });
+      // Read ZIP file
+      const zip = await JSZip.loadAsync(file);
+      const excelFiles = Object.keys(zip.files).filter((fileName) =>
+        fileName.endsWith(".xlsx") || fileName.endsWith(".xls")
+      );
+
+      // Process each Excel file in the ZIP
+      for (let fileName of excelFiles) {
+        const fileData = await zip.files[fileName].async("arraybuffer");
+        const workbook = XLSX.read(fileData);
+        const sheetNames = workbook.SheetNames;
+
+        sheetNames.forEach((sheetName) => {
+          const sheet = workbook.Sheets[sheetName];
+          const json = XLSX.utils.sheet_to_json(sheet, { defval: "" });
+          mergedData = mergedData.concat(json);
+        });
+      }
 
       const uploadPercent = Math.round(((i + 1) / totalFiles) * 50);
       setProgress(uploadPercent);
 
-      // simulate time left (e.g., 50% = half of total estimated 2 minutes)
+      // Simulate time left (e.g., 50% = half of total estimated 2 minutes)
       const remainingSec = Math.max(0, Math.round((50 - uploadPercent) / 50 * 120));
-      setTimeLeft(`${remainingSec} sec to go`);
+      setTimeLeft(${remainingSec} sec to go);
 
       await new Promise((r) => setTimeout(r, 500)); // animation delay
     }
@@ -58,7 +69,7 @@ const ExcelMergerCSV = () => {
     for (let i = 50; i <= 100; i++) {
       setProgress(i);
       const remainingSec = Math.max(0, Math.round((100 - i) / 50 * 30));
-      setTimeLeft(`${remainingSec} sec to go`);
+      setTimeLeft(${remainingSec} sec to go);
       await new Promise((r) => setTimeout(r, 100));
     }
 
@@ -87,7 +98,7 @@ const ExcelMergerCSV = () => {
 
       <input
         type="file"
-        accept=".xlsx,.xls"
+        accept=".zip"
         multiple
         onChange={handleFileChange}
         style={styles.fileInput}
@@ -112,7 +123,7 @@ const ExcelMergerCSV = () => {
           <div
             style={{
               ...styles.progressBar,
-              width: `${progress}%`,
+              width: ${progress}%,
             }}
           >
             {progress}% - {timeLeft}
