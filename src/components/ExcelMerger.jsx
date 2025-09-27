@@ -1,3 +1,4 @@
+
 import React, { useState } from "react";
 import * as XLSX from "xlsx";
 import JSZip from "jszip"; // Import JSZip for handling zip files
@@ -52,8 +53,11 @@ const ExcelMergerCSV = () => {
       setProgress(uploadPercent);
 
       // Simulate time left (e.g., 50% = half of total estimated 2 minutes)
-      const remainingSec = Math.max(0, Math.round((50 - uploadPercent) / 50 * 120));
-      setTimeLeft(${remainingSec} sec to go);
+      const remainingSec = Math.max(
+        0,
+        Math.round(((50 - uploadPercent) / 50) * 120)
+      );
+      setTimeLeft(`${remainingSec} sec to go`);
 
       await new Promise((r) => setTimeout(r, 500)); // animation delay
     }
@@ -68,8 +72,8 @@ const ExcelMergerCSV = () => {
     // Simulate download progress animation
     for (let i = 50; i <= 100; i++) {
       setProgress(i);
-      const remainingSec = Math.max(0, Math.round((100 - i) / 50 * 30));
-      setTimeLeft(${remainingSec} sec to go);
+      const remainingSec = Math.max(0, Math.round(((100 - i) / 50) * 30));
+      setTimeLeft(`${remainingSec} sec to go`);
       await new Promise((r) => setTimeout(r, 100));
     }
 
@@ -123,7 +127,7 @@ const ExcelMergerCSV = () => {
           <div
             style={{
               ...styles.progressBar,
-              width: ${progress}%,
+              width: `${progress}%`,
             }}
           >
             {progress}% - {timeLeft}
