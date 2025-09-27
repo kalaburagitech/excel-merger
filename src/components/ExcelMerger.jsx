@@ -1,191 +1,258 @@
-
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import * as XLSX from "xlsx";
-import JSZip from "jszip"; // Import JSZip for handling zip files
+import JSZip from "jszip";
 
-const ExcelMergerCSV = () => {
+export default function ExcelMergerCSV() {
   const [files, setFiles] = useState([]);
   const [progress, setProgress] = useState(0);
-  const [status, setStatus] = useState(""); // "Uploading..." / "Downloading..."
+  const [status, setStatus] = useState("");
   const [timeLeft, setTimeLeft] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState("");
+  const fileInputRef = useRef(null);
+  const [estimatedTotalSeconds, setEstimatedTotalSeconds] = useState(0);
+
+  useEffect(() => {
+    if (files.length === 0) setMessage("");
+  }, [files]);
 
   const handleFileChange = (e) => {
-    setFiles(Array.from(e.target.files));
+    const selected = Array.from(e.target.files);
+    setFiles(selected);
     setProgress(0);
     setStatus("");
     setTimeLeft("");
+    setMessage("");
+  };
+
+  const fmt = (s) => {
+    if (s <= 0) return "0s";
+    if (s < 60) return `${s}s`;
+    const m = Math.floor(s / 60);
+    const sec = s % 60;
+    return `${m}m ${sec}s`;
   };
 
   const mergeAndDownloadCSV = async () => {
     if (files.length === 0) {
-      alert("Please select a ZIP file!");
+      setMessage("Please select at least one ZIP file to upload.");
       return;
     }
 
+    setLoading(true);
     setStatus("Uploading...");
+    setProgress(2);
+    setMessage("");
+
     const totalFiles = files.length;
     let mergedData = [];
 
-    // Simulate upload with estimated time
+    const estimatePerZip = 8;
+    const estimateDownload = 4;
+    setEstimatedTotalSeconds(totalFiles * estimatePerZip + estimateDownload);
+
+    let elapsed = 0;
+
     for (let i = 0; i < totalFiles; i++) {
       const file = files[i];
 
-      // Read ZIP file
-      const zip = await JSZip.loadAsync(file);
-      const excelFiles = Object.keys(zip.files).filter((fileName) =>
-        fileName.endsWith(".xlsx") || fileName.endsWith(".xls")
-      );
+      try {
+        const zip = await JSZip.loadAsync(file);
+        const excelFiles = Object.keys(zip.files).filter((name) =>
+          name.toLowerCase().endsWith(".xlsx") || name.toLowerCase().endsWith(".xls")
+        );
 
-      // Process each Excel file in the ZIP
-      for (let fileName of excelFiles) {
-        const fileData = await zip.files[fileName].async("arraybuffer");
-        const workbook = XLSX.read(fileData);
-        const sheetNames = workbook.SheetNames;
+        for (let fileName of excelFiles) {
+          const fileData = await zip.files[fileName].async("arraybuffer");
+          const workbook = XLSX.read(fileData);
+          workbook.SheetNames.forEach((sheetName) => {
+            const sheet = workbook.Sheets[sheetName];
+            const json = XLSX.utils.sheet_to_json(sheet, { defval: "" });
+            mergedData = mergedData.concat(json);
+          });
+        }
 
-        sheetNames.forEach((sheetName) => {
-          const sheet = workbook.Sheets[sheetName];
-          const json = XLSX.utils.sheet_to_json(sheet, { defval: "" });
-          mergedData = mergedData.concat(json);
-        });
+        const uploadPercent = 2 + Math.round(((i + 1) / totalFiles) * 58);
+        setProgress(uploadPercent);
+
+        elapsed += estimatePerZip;
+        const remain = Math.max(0, totalFiles * estimatePerZip + estimateDownload - elapsed);
+        setTimeLeft(`${fmt(remain)} left`);
+
+        await new Promise((r) => setTimeout(r, 600));
+      } catch (err) {
+        console.error("Error processing file", file.name, err);
+        setMessage((m) => m + `\nFailed to process ${file.name}`);
       }
-
-      const uploadPercent = Math.round(((i + 1) / totalFiles) * 50);
-      setProgress(uploadPercent);
-
-      // Simulate time left (e.g., 50% = half of total estimated 2 minutes)
-      const remainingSec = Math.max(
-        0,
-        Math.round(((50 - uploadPercent) / 50) * 120)
-      );
-      setTimeLeft(`${remainingSec} sec to go`);
-
-      await new Promise((r) => setTimeout(r, 500)); // animation delay
     }
 
     setStatus("Downloading...");
-    setTimeLeft("30 sec to go"); // initial estimate for download
-    setProgress(50);
+    setProgress(62);
 
-    // Convert JSON to CSV
     const csv = XLSX.utils.sheet_to_csv(XLSX.utils.json_to_sheet(mergedData));
 
-    // Simulate download progress animation
-    for (let i = 50; i <= 100; i++) {
-      setProgress(i);
-      const remainingSec = Math.max(0, Math.round(((100 - i) / 50) * 30));
-      setTimeLeft(`${remainingSec} sec to go`);
-      await new Promise((r) => setTimeout(r, 100));
+    for (let p = 62; p <= 100; p++) {
+      setProgress(p);
+      const remain = Math.max(0, Math.round(((100 - p) / 38) * (estimatedTotalSeconds - elapsed)));
+      setTimeLeft(`${fmt(remain)} left`);
+      await new Promise((r) => setTimeout(r, Math.max(20, 180 - p * 1.2)));
     }
 
-    // Trigger download
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.setAttribute("download", "merged_file.csv");
+    link.setAttribute("download", `merged_${Date.now()}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    URL.revokeObjectURL(url);
 
-    // Reset progress
     setStatus("Completed!");
+    setTimeLeft("Done");
+
     setTimeout(() => {
+      setLoading(false);
       setProgress(0);
       setStatus("");
       setTimeLeft("");
-    }, 2000);
+      setFiles([]);
+      if (fileInputRef.current) fileInputRef.current.value = null;
+    }, 1800);
+  };
+
+  const fileLabel = (f) => {
+    if (!f) return "No file";
+    const n = f.name || "untitled";
+    return n.length > 28 ? n.slice(0, 24) + "..." : n;
   };
 
   return (
-    <div style={styles.container}>
-      <h1 style={styles.title}>Excel to CSV Merger</h1>
+    <div style={styles.page}>
+      <div style={styles.card}>
+        <h1 style={styles.title}>Excel → CSV <span style={{ color: "#8ab4f8" }}>Merger</span></h1>
+        <p style={styles.subtitle}>Upload ZIP files with Excel sheets and merge into one CSV.</p>
 
-      <input
-        type="file"
-        accept=".zip"
-        multiple
-        onChange={handleFileChange}
-        style={styles.fileInput}
-        disabled={progress > 0}
-      />
-
-      <button
-        onClick={mergeAndDownloadCSV}
-        style={{
-          ...styles.button,
-          backgroundColor: progress > 0 ? "#888" : "#3b82f6",
-        }}
-        disabled={progress > 0}
-      >
-        {progress > 0 ? status : "Merge & Download CSV"}
-      </button>
-
-      {files.length > 0 && <p>{files.length} file(s) selected</p>}
-
-      {progress > 0 && (
-        <div style={styles.progressBarContainer}>
-          <div
-            style={{
-              ...styles.progressBar,
-              width: `${progress}%`,
-            }}
-          >
-            {progress}% - {timeLeft}
+        <label style={styles.dropArea}>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".zip"
+            multiple
+            onChange={handleFileChange}
+            style={{ display: "none" }}
+            disabled={loading}
+          />
+          <div style={styles.dropContent}>
+            <div style={styles.icon}>📦</div>
+            <div>
+              <div style={styles.dropText}>Select ZIP files</div>
+              <div style={styles.dropHint}>Multiple ZIPs allowed. Each ZIP may have multiple Excel files.</div>
+              <div style={styles.fileTags}>
+                {files.length === 0 ? (
+                  <div style={styles.fileTag}>No files chosen</div>
+                ) : (
+                  files.map((f, idx) => (
+                    <div key={idx} style={styles.fileTag}>{fileLabel(f)}</div>
+                  ))
+                )}
+              </div>
+            </div>
           </div>
+        </label>
+
+        <div style={styles.actions}>
+          <button onClick={mergeAndDownloadCSV} disabled={loading || files.length === 0} style={styles.uploadBtn}>
+            {loading ? `${status}` : "Merge & Download CSV"}
+          </button>
+          <button
+            onClick={() => { setFiles([]); setMessage(''); if (fileInputRef.current) fileInputRef.current.value = null; }}
+            disabled={loading || files.length === 0}
+            style={styles.clearBtn}
+          >
+            Clear
+          </button>
+          <div style={styles.fileCount}>{files.length} selected</div>
         </div>
-      )}
+
+        <div style={styles.progressWrapper}>
+          <div style={{ ...styles.progressBar, width: `${progress}%` }}></div>
+        </div>
+        <div style={styles.progressInfo}>
+          <span>{progress}%</span>
+          <span>{status || (loading ? "Preparing..." : "Idle")}</span>
+          <span>{timeLeft}</span>
+        </div>
+
+        {message && <div style={styles.message}>{message}</div>}
+      </div>
     </div>
   );
-};
-
-export default ExcelMergerCSV;
+}
 
 const styles = {
-  container: {
+  page: {
+    minHeight: "100vh",
     display: "flex",
-    flexDirection: "column",
     alignItems: "center",
     justifyContent: "center",
-    minHeight: "100vh",
+    background: "linear-gradient(to bottom, #0f172a, #1e293b)",
     padding: 20,
-    backgroundColor: "#f1f5f9",
+  },
+  card: {
+    background: "rgba(255,255,255,0.05)",
+    borderRadius: 20,
+    padding: 30,
+    width: "100%",
+    maxWidth: 600,
+    boxShadow: "0 20px 60px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.05)",
+    backdropFilter: "blur(10px)",
+    color: "#fff",
   },
   title: {
     fontSize: 28,
     fontWeight: "bold",
+    marginBottom: 8,
+  },
+  subtitle: {
+    fontSize: 14,
+    color: "#a5b4fc",
     marginBottom: 20,
-    color: "#1e40af",
   },
-  fileInput: {
-    padding: 10,
-    border: "1px solid #ccc",
-    borderRadius: 8,
-    marginBottom: 15,
-    width: 300,
+  dropArea: {
+    border: "2px dashed rgba(255,255,255,0.2)",
+    borderRadius: 12,
+    padding: 20,
+    marginBottom: 20,
+    cursor: "pointer",
   },
-  button: {
-    padding: "10px 20px",
+  dropContent: { display: "flex", gap: 15, alignItems: "center" },
+  icon: { fontSize: 36 },
+  dropText: { fontSize: 16, fontWeight: "bold" },
+  dropHint: { fontSize: 12, color: "#cbd5e1", marginTop: 4 },
+  fileTags: { marginTop: 8, display: "flex", flexWrap: "wrap", gap: 6 },
+  fileTag: { fontSize: 12, padding: "4px 8px", background: "rgba(99,102,241,0.2)", borderRadius: 8 },
+  actions: { display: "flex", alignItems: "center", gap: 10, marginTop: 20 },
+  uploadBtn: {
+    padding: "10px 16px",
+    borderRadius: 10,
     border: "none",
-    borderRadius: 8,
+    background: "linear-gradient(135deg,#4f46e5,#06b6d4)",
+    color: "#fff",
+    fontWeight: "bold",
+    cursor: "pointer",
+  },
+  clearBtn: {
+    padding: "8px 14px",
+    borderRadius: 10,
+    background: "rgba(255,255,255,0.1)",
     color: "#fff",
     cursor: "pointer",
-    transition: "all 0.3s",
+    fontSize: 14,
   },
-  progressBarContainer: {
-    width: 300,
-    height: 30,
-    backgroundColor: "#e5e7eb",
-    borderRadius: 8,
-    marginTop: 20,
-    overflow: "hidden",
-  },
-  progressBar: {
-    height: "100%",
-    backgroundColor: "#3b82f6",
-    color: "#fff",
-    textAlign: "center",
-    lineHeight: "30px",
-    fontWeight: "bold",
-    transition: "width 0.3s",
-  },
+  fileCount: { marginLeft: "auto", fontSize: 12, color: "#cbd5e1" },
+  progressWrapper: { width: "100%", height: 10, background: "rgba(255,255,255,0.1)", borderRadius: 6, marginTop: 20, overflow: "hidden" },
+  progressBar: { height: "100%", background: "linear-gradient(90deg,#7c3aed,#06b6d4)", transition: "width 0.3s" },
+  progressInfo: { display: "flex", justifyContent: "space-between", marginTop: 8, fontSize: 12, color: "#e2e8f0" },
+  message: { marginTop: 16, padding: 10, borderRadius: 8, background: "rgba(251,191,36,0.2)", color: "#fcd34d", fontSize: 12 },
 };
