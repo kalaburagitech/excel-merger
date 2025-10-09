@@ -45,17 +45,24 @@ export default function ExcelMergerCSV() {
     setMessage("");
 
     const totalFiles = files.length;
-    let mergedData = [];
-
     const estimatePerZip = 8;
     const estimateDownload = 4;
     setEstimatedTotalSeconds(totalFiles * estimatePerZip + estimateDownload);
 
     let elapsed = 0;
 
+    // Create a CSV blob with headers, streaming data
+    const headersWritten = false;
+    const csvStream = [];
+
+    const writeCsvRow = (row) => {
+      const csvRow = row.map(cell => `"${cell}"`).join(",");
+      csvStream.push(csvRow);
+    };
+
+    // Start the file processing
     for (let i = 0; i < totalFiles; i++) {
       const file = files[i];
-
       try {
         const zip = await JSZip.loadAsync(file);
         const excelFiles = Object.keys(zip.files).filter((name) =>
@@ -68,10 +75,20 @@ export default function ExcelMergerCSV() {
           workbook.SheetNames.forEach((sheetName) => {
             const sheet = workbook.Sheets[sheetName];
             const json = XLSX.utils.sheet_to_json(sheet, { defval: "" });
-            mergedData = mergedData.concat(json);
+
+            // Stream each row to the CSV
+            json.forEach((row, rowIndex) => {
+              const rowArray = Object.values(row);
+              if (rowIndex === 0 && !headersWritten) {
+                // Write headers if it's the first row
+                writeCsvRow(Object.keys(row));
+              }
+              writeCsvRow(rowArray);
+            });
           });
         }
 
+        // Update progress
         const uploadPercent = 2 + Math.round(((i + 1) / totalFiles) * 58);
         setProgress(uploadPercent);
 
@@ -86,19 +103,15 @@ export default function ExcelMergerCSV() {
       }
     }
 
+    // Now we are done merging, let's create the CSV file and download it
     setStatus("Downloading...");
     setProgress(62);
 
-    const csv = XLSX.utils.sheet_to_csv(XLSX.utils.json_to_sheet(mergedData));
+    // Join CSV rows and create the final CSV content
+    const csvContent = csvStream.join("\n");
 
-    for (let p = 62; p <= 100; p++) {
-      setProgress(p);
-      const remain = Math.max(0, Math.round(((100 - p) / 38) * (estimatedTotalSeconds - elapsed)));
-      setTimeLeft(`${fmt(remain)} left`);
-      await new Promise((r) => setTimeout(r, Math.max(20, 180 - p * 1.2)));
-    }
-
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    // Create Blob for the final CSV content
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
@@ -208,6 +221,7 @@ const styles = {
     boxShadow: "0 20px 60px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.05)",
     backdropFilter: "blur(10px)",
     color: "#fff",
+ 
   },
   title: {
     fontSize: 28,
